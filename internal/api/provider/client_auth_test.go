@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -130,19 +131,31 @@ func TestClientAuth_ClientSecretMethods(t *testing.T) {
 }
 
 func TestParseClientSigningKey(t *testing.T) {
-	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ecKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	require.NoError(t, err)
-	signer, err := ParseClientSigningKey(pemEncodePKCS8(t, ecKey))
+	key, err := ParseClientSigningKey(pemEncodePKCS8(t, ecKey))
 	require.NoError(t, err)
-	method, err := signingMethodFor(signer)
-	require.NoError(t, err)
-	assert.Equal(t, "ES256", method.Alg())
+	assert.Equal(t, "ES384", key.Algorithm().String(), "PEM keys get the default alg for their type")
 
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	pkcs1 := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(rsaKey)}))
-	_, err = ParseClientSigningKey(pkcs1)
+	jwkKey, err := jwk.FromRaw(rsaKey)
 	require.NoError(t, err)
+	require.NoError(t, jwkKey.Set(jwk.KeyIDKey, "from-jwk"))
+	jwkJSON, err := json.Marshal(jwkKey)
+	require.NoError(t, err)
+	key, err = ParseClientSigningKey(string(jwkJSON))
+	require.NoError(t, err)
+	assert.Equal(t, "RS256", key.Algorithm().String())
+	assert.Equal(t, "from-jwk", key.KeyID())
+
+	publicJWK, err := jwk.PublicKeyOf(jwkKey)
+	require.NoError(t, err)
+	require.NoError(t, publicJWK.Set(jwk.AlgorithmKey, "RS256"))
+	publicJSON, err := json.Marshal(publicJWK)
+	require.NoError(t, err)
+	_, err = ParseClientSigningKey(string(publicJSON))
+	assert.ErrorContains(t, err, "private key", "a public key with alg set is still rejected")
 
 	weakKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
@@ -150,11 +163,5 @@ func TestParseClientSigningKey(t *testing.T) {
 	assert.ErrorContains(t, err, "at least 2048 bits")
 
 	_, err = ParseClientSigningKey("not a key")
-	assert.ErrorContains(t, err, "not PEM encoded")
-
-	_, err = NewClientAuth("private_key_jwt", "", "")
-	assert.Error(t, err)
-
-	_, err = NewClientAuth("tls_client_auth", "", "")
-	assert.ErrorContains(t, err, "unsupported token endpoint auth method")
+	assert.ErrorContains(t, err, "not a valid JWK or PEM")
 }

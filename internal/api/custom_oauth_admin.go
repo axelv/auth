@@ -61,8 +61,8 @@ type AdminCustomOAuthProviderParams struct {
 	Enabled               *bool                  `json:"enabled,omitempty"`
 	EmailOptional         *bool                  `json:"email_optional,omitempty"`
 
-	// Token endpoint client authentication. client_signing_key is a PEM private
-	// key, required for (and only accepted with) private_key_jwt.
+	// Token endpoint client authentication. client_signing_key is a JWK or PEM
+	// private key, required for (and only accepted with) private_key_jwt.
 	TokenEndpointAuthMethod *string `json:"token_endpoint_auth_method,omitempty"`
 	ClientSigningKey        string  `json:"client_signing_key,omitempty"`
 	ClientSigningKeyID      *string `json:"client_signing_key_id,omitempty"`
@@ -656,7 +656,7 @@ func updateProviderFromParams(provider *models.CustomOAuthProvider, params *Admi
 }
 
 // setClientAuth validates the provider's final token endpoint authentication
-// settings and stores newSigningKey, the plaintext PEM key from this request.
+// settings and stores newSigningKey, the plaintext private key from this request.
 func setClientAuth(p *models.CustomOAuthProvider, newSigningKey string, dbEncryption conf.DatabaseEncryptionConfiguration) error {
 	method := ""
 	if p.TokenEndpointAuthMethod != nil {
@@ -664,7 +664,7 @@ func setClientAuth(p *models.CustomOAuthProvider, newSigningKey string, dbEncryp
 	}
 
 	switch method {
-	case "", models.TokenEndpointAuthClientSecretBasic, models.TokenEndpointAuthClientSecretPost:
+	case "", models.TokenEndpointAuthMethodClientSecretBasic, models.TokenEndpointAuthMethodClientSecretPost:
 		if newSigningKey != "" {
 			return apierrors.NewBadRequestError(apierrors.ErrorCodeValidationFailed, "client_signing_key requires token_endpoint_auth_method 'private_key_jwt'")
 		}
@@ -675,7 +675,7 @@ func setClientAuth(p *models.CustomOAuthProvider, newSigningKey string, dbEncryp
 		p.ClientSigningKey = nil
 		p.ClientSigningKeyID = nil
 		return nil
-	case models.TokenEndpointAuthPrivateKeyJWT:
+	case models.TokenEndpointAuthMethodPrivateKeyJWT:
 		if newSigningKey == "" {
 			if p.ClientSigningKey == nil {
 				return apierrors.NewBadRequestError(apierrors.ErrorCodeValidationFailed, "client_signing_key is required for token_endpoint_auth_method 'private_key_jwt'")
@@ -693,7 +693,7 @@ func setClientAuth(p *models.CustomOAuthProvider, newSigningKey string, dbEncryp
 		return apierrors.NewBadRequestError(
 			apierrors.ErrorCodeValidationFailed,
 			"token_endpoint_auth_method must be one of: %s, %s, %s",
-			models.TokenEndpointAuthClientSecretBasic, models.TokenEndpointAuthClientSecretPost, models.TokenEndpointAuthPrivateKeyJWT,
+			models.TokenEndpointAuthMethodClientSecretBasic, models.TokenEndpointAuthMethodClientSecretPost, models.TokenEndpointAuthMethodPrivateKeyJWT,
 		)
 	}
 }

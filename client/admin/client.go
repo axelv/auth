@@ -722,10 +722,10 @@ type PostAdminCustomProvidersJSONBody struct {
 	// ClientSecret OAuth client secret (will be encrypted at rest). Required unless token_endpoint_auth_method is private_key_jwt.
 	ClientSecret *string `json:"client_secret,omitempty"`
 
-	// ClientSigningKey PEM-encoded private key (RSA 2048 bits or more, EC P-256/P-384/P-521, or Ed25519) used to sign client assertions. Required for, and only accepted with, token_endpoint_auth_method private_key_jwt. Encrypted at rest and never returned.
+	// ClientSigningKey Private key used to sign client assertions, as a JWK or in PEM form (RSA 2048 bits or more, EC P-256/P-384/P-521, or Ed25519). Without an alg, the default for the key type is used (RS256, ES256/ES384/ES512, EdDSA). Required for, and only accepted with, token_endpoint_auth_method private_key_jwt. Encrypted at rest and never returned.
 	ClientSigningKey *string `json:"client_signing_key,omitempty"`
 
-	// ClientSigningKeyId Optional kid header for client assertions, matching the key registered with the provider.
+	// ClientSigningKeyId Optional kid header for client assertions, matching the key registered with the provider. Overrides the kid of a JWK client_signing_key.
 	ClientSigningKeyId *string `json:"client_signing_key_id,omitempty"`
 
 	// CustomClaimsAllowlist Raw IdP claim keys to copy verbatim into the user's custom_claims (e.g. groups, org_id). For OIDC providers these are read from the ID token claims (falling back to the userinfo response when no ID token is returned); for OAuth2 providers they are read from the userinfo response. Empty preserves no non-standard claims.
@@ -814,10 +814,10 @@ type PutAdminCustomProvidersIdentifierJSONBody struct {
 	// ClientSecret OAuth client secret (only provide if changing, will be encrypted)
 	ClientSecret *string `json:"client_secret,omitempty"`
 
-	// ClientSigningKey PEM-encoded private key (RSA 2048 bits or more, EC P-256/P-384/P-521, or Ed25519) used to sign client assertions. Required for, and only accepted with, token_endpoint_auth_method private_key_jwt. Encrypted at rest and never returned.
+	// ClientSigningKey Private key used to sign client assertions, as a JWK or in PEM form (RSA 2048 bits or more, EC P-256/P-384/P-521, or Ed25519). Without an alg, the default for the key type is used (RS256, ES256/ES384/ES512, EdDSA). Required for, and only accepted with, token_endpoint_auth_method private_key_jwt. Encrypted at rest and never returned.
 	ClientSigningKey *string `json:"client_signing_key,omitempty"`
 
-	// ClientSigningKeyId Optional kid header for client assertions, matching the key registered with the provider.
+	// ClientSigningKeyId Optional kid header for client assertions, matching the key registered with the provider. Overrides the kid of a JWK client_signing_key.
 	ClientSigningKeyId *string `json:"client_signing_key_id,omitempty"`
 
 	// CustomClaimsAllowlist Raw IdP claim keys to copy verbatim into the user's custom_claims (e.g. groups, org_id). For OIDC providers these are read from the ID token claims (falling back to the userinfo response when no ID token is returned); for OAuth2 providers they are read from the userinfo response. Empty preserves no non-standard claims.

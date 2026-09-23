@@ -763,12 +763,6 @@ func (ts *CustomOAuthAdminTestSuite) TestPrivateKeyJWTCreateUpdateGet() {
 }
 
 func (ts *CustomOAuthAdminTestSuite) TestPrivateKeyJWTValidation() {
-	weakKey, err := rsa.GenerateKey(rand.Reader, 1024)
-	require.NoError(ts.T(), err)
-	weakDER, err := x509.MarshalPKCS8PrivateKey(weakKey)
-	require.NoError(ts.T(), err)
-	weakPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: weakDER}))
-
 	cases := []struct {
 		name   string
 		mutate func(map[string]interface{})
@@ -784,13 +778,9 @@ func (ts *CustomOAuthAdminTestSuite) TestPrivateKeyJWTValidation() {
 			p["token_endpoint_auth_method"] = "client_secret_post"
 			p["client_signing_key"] = ts.generateSigningKeyPEM()
 		}},
-		{"malformed signing key", func(p map[string]interface{}) {
+		{"unparseable signing key", func(p map[string]interface{}) {
 			p["token_endpoint_auth_method"] = "private_key_jwt"
 			p["client_signing_key"] = "not a key"
-		}},
-		{"RSA key below 2048 bits", func(p map[string]interface{}) {
-			p["token_endpoint_auth_method"] = "private_key_jwt"
-			p["client_signing_key"] = weakPEM
 		}},
 		{"unknown method", func(p map[string]interface{}) {
 			p["token_endpoint_auth_method"] = "tls_client_auth"

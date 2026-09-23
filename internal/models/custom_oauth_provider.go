@@ -23,14 +23,6 @@ const (
 	ProviderTypeOIDC   ProviderType = "oidc"
 )
 
-// Token endpoint client authentication methods (OIDC Core §9). A nil
-// TokenEndpointAuthMethod auto-detects between the two client_secret methods.
-const (
-	TokenEndpointAuthClientSecretBasic = "client_secret_basic"
-	TokenEndpointAuthClientSecretPost  = "client_secret_post"
-	TokenEndpointAuthPrivateKeyJWT     = "private_key_jwt"
-)
-
 // CustomOAuthProvider represents a custom OAuth2 or OIDC provider configuration
 type CustomOAuthProvider struct {
 	ID           uuid.UUID    `db:"id" json:"id"`
@@ -52,8 +44,9 @@ type CustomOAuthProvider struct {
 	Enabled               bool          `db:"enabled" json:"enabled"`
 	EmailOptional         bool          `db:"email_optional" json:"email_optional"`
 
-	// Token endpoint client authentication. ClientSigningKey is a PEM private
-	// key used for private_key_jwt, encrypted like ClientSecret.
+	// Token endpoint client authentication. A nil TokenEndpointAuthMethod
+	// auto-detects between the client_secret methods. ClientSigningKey is the
+	// JWK or PEM private key used for private_key_jwt, encrypted like ClientSecret.
 	TokenEndpointAuthMethod *string `db:"token_endpoint_auth_method" json:"token_endpoint_auth_method,omitempty"`
 	ClientSigningKey        *string `db:"client_signing_key" json:"-"`
 	ClientSigningKeyID      *string `db:"client_signing_key_id" json:"client_signing_key_id,omitempty"`
@@ -92,10 +85,10 @@ func (p *CustomOAuthProvider) SetClientSecret(secret string, dbEncryption conf.D
 	return nil
 }
 
-// SetClientSigningKey encrypts and stores the PEM private key used for
+// SetClientSigningKey encrypts and stores the JWK or PEM private key used for
 // private_key_jwt client authentication.
-func (p *CustomOAuthProvider) SetClientSigningKey(pemKey string, dbEncryption conf.DatabaseEncryptionConfiguration) error {
-	stored, err := p.encryptValue(pemKey, dbEncryption)
+func (p *CustomOAuthProvider) SetClientSigningKey(key string, dbEncryption conf.DatabaseEncryptionConfiguration) error {
+	stored, err := p.encryptValue(key, dbEncryption)
 	if err != nil {
 		return errors.Wrap(err, "error encrypting custom OAuth client signing key")
 	}
@@ -103,7 +96,7 @@ func (p *CustomOAuthProvider) SetClientSigningKey(pemKey string, dbEncryption co
 	return nil
 }
 
-// GetClientSigningKey decrypts and returns the PEM private key, or "" if none is set.
+// GetClientSigningKey decrypts and returns the private key, or "" if none is set.
 func (p *CustomOAuthProvider) GetClientSigningKey(dbEncryption conf.DatabaseEncryptionConfiguration) (string, error) {
 	if p.ClientSigningKey == nil {
 		return "", nil
@@ -117,7 +110,7 @@ func (p *CustomOAuthProvider) GetClientSigningKey(dbEncryption conf.DatabaseEncr
 
 // UsesPrivateKeyJWT reports whether the token endpoint expects a signed client assertion.
 func (p *CustomOAuthProvider) UsesPrivateKeyJWT() bool {
-	return p.TokenEndpointAuthMethod != nil && *p.TokenEndpointAuthMethod == TokenEndpointAuthPrivateKeyJWT
+	return p.TokenEndpointAuthMethod != nil && *p.TokenEndpointAuthMethod == TokenEndpointAuthMethodPrivateKeyJWT
 }
 
 // encryptValue encrypts a secret bound to this provider's ID. Empty values and

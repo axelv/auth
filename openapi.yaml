@@ -2701,10 +2701,10 @@ paths:
                 client_signing_key:
                   type: string
                   writeOnly: true
-                  description: PEM-encoded private key (RSA 2048 bits or more, EC P-256/P-384/P-521, or Ed25519) used to sign client assertions. Required for, and only accepted with, token_endpoint_auth_method private_key_jwt. Encrypted at rest and never returned.
+                  description: Private key used to sign client assertions, as a JWK or in PEM form (RSA 2048 bits or more, EC P-256/P-384/P-521, or Ed25519). Without an alg, the default for the key type is used (RS256, ES256/ES384/ES512, EdDSA). Required for, and only accepted with, token_endpoint_auth_method private_key_jwt. Encrypted at rest and never returned.
                 client_signing_key_id:
                   type: string
-                  description: Optional kid header for client assertions, matching the key registered with the provider.
+                  description: Optional kid header for client assertions, matching the key registered with the provider. Overrides the kid of a JWK client_signing_key.
                 issuer:
                   type: string
                   format: uri
@@ -2942,10 +2942,10 @@ paths:
                 client_signing_key:
                   type: string
                   writeOnly: true
-                  description: PEM-encoded private key (RSA 2048 bits or more, EC P-256/P-384/P-521, or Ed25519) used to sign client assertions. Required for, and only accepted with, token_endpoint_auth_method private_key_jwt. Encrypted at rest and never returned.
+                  description: Private key used to sign client assertions, as a JWK or in PEM form (RSA 2048 bits or more, EC P-256/P-384/P-521, or Ed25519). Without an alg, the default for the key type is used (RS256, ES256/ES384/ES512, EdDSA). Required for, and only accepted with, token_endpoint_auth_method private_key_jwt. Encrypted at rest and never returned.
                 client_signing_key_id:
                   type: string
-                  description: Optional kid header for client assertions, matching the key registered with the provider.
+                  description: Optional kid header for client assertions, matching the key registered with the provider. Overrides the kid of a JWK client_signing_key.
                 issuer:
                   type: string
                   format: uri
