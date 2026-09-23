@@ -36,6 +36,27 @@ func (e CustomOAuthProviderSchemaProviderType) Valid() bool {
 	}
 }
 
+// Defines values for CustomOAuthProviderSchemaTokenEndpointAuthMethod.
+const (
+	CustomOAuthProviderSchemaTokenEndpointAuthMethodClientSecretBasic CustomOAuthProviderSchemaTokenEndpointAuthMethod = "client_secret_basic"
+	CustomOAuthProviderSchemaTokenEndpointAuthMethodClientSecretPost  CustomOAuthProviderSchemaTokenEndpointAuthMethod = "client_secret_post"
+	CustomOAuthProviderSchemaTokenEndpointAuthMethodPrivateKeyJwt     CustomOAuthProviderSchemaTokenEndpointAuthMethod = "private_key_jwt"
+)
+
+// Valid indicates whether the value is a known member of the CustomOAuthProviderSchemaTokenEndpointAuthMethod enum.
+func (e CustomOAuthProviderSchemaTokenEndpointAuthMethod) Valid() bool {
+	switch e {
+	case CustomOAuthProviderSchemaTokenEndpointAuthMethodClientSecretBasic:
+		return true
+	case CustomOAuthProviderSchemaTokenEndpointAuthMethodClientSecretPost:
+		return true
+	case CustomOAuthProviderSchemaTokenEndpointAuthMethodPrivateKeyJwt:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorSchemaWeakPasswordReasons.
 const (
 	Characters ErrorSchemaWeakPasswordReasons = "characters"
@@ -177,6 +198,48 @@ func (e PostAdminCustomProvidersJSONBodyProviderType) Valid() bool {
 	case PostAdminCustomProvidersJSONBodyProviderTypeOauth2:
 		return true
 	case PostAdminCustomProvidersJSONBodyProviderTypeOidc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethod.
+const (
+	PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethodClientSecretBasic PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethod = "client_secret_basic"
+	PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethodClientSecretPost  PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethod = "client_secret_post"
+	PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethodPrivateKeyJwt     PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethod = "private_key_jwt"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethod enum.
+func (e PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethod) Valid() bool {
+	switch e {
+	case PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethodClientSecretBasic:
+		return true
+	case PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethodClientSecretPost:
+		return true
+	case PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethodPrivateKeyJwt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethod.
+const (
+	PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethodClientSecretBasic PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethod = "client_secret_basic"
+	PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethodClientSecretPost  PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethod = "client_secret_post"
+	PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethodPrivateKeyJwt     PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethod = "private_key_jwt"
+)
+
+// Valid indicates whether the value is a known member of the PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethod enum.
+func (e PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethod) Valid() bool {
+	switch e {
+	case PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethodClientSecretBasic:
+		return true
+	case PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethodClientSecretPost:
+		return true
+	case PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethodPrivateKeyJwt:
 		return true
 	default:
 		return false
@@ -355,8 +418,11 @@ type CustomOAuthProviderSchema struct {
 	AuthorizationUrl *string `json:"authorization_url,omitempty"`
 
 	// ClientId OAuth client ID
-	ClientId  string     `json:"client_id"`
-	CreatedAt *time.Time `json:"created_at,omitempty"`
+	ClientId string `json:"client_id"`
+
+	// ClientSigningKeyId kid header sent with private_key_jwt client assertions
+	ClientSigningKeyId *string    `json:"client_signing_key_id,omitempty"`
+	CreatedAt          *time.Time `json:"created_at,omitempty"`
 
 	// CustomClaimsAllowlist Raw IdP claim keys copied verbatim into the user's custom_claims (e.g. groups, org_id). For OIDC providers these are read from the ID token claims (falling back to the userinfo response when no ID token is returned); for OAuth2 providers they are read from the userinfo response. Empty preserves no non-standard claims.
 	//
@@ -407,6 +473,9 @@ type CustomOAuthProviderSchema struct {
 	// SkipNonceCheck Skip nonce validation for OIDC (not recommended for production)
 	SkipNonceCheck *bool `json:"skip_nonce_check,omitempty"`
 
+	// TokenEndpointAuthMethod Token endpoint client authentication method. Absent means client_secret_basic with a client_secret_post fallback.
+	TokenEndpointAuthMethod *CustomOAuthProviderSchemaTokenEndpointAuthMethod `json:"token_endpoint_auth_method,omitempty"`
+
 	// TokenUrl OAuth 2.0 token endpoint (required for OAuth2 providers)
 	TokenUrl  *string    `json:"token_url,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
@@ -417,6 +486,9 @@ type CustomOAuthProviderSchema struct {
 
 // CustomOAuthProviderSchemaProviderType Type of OAuth provider
 type CustomOAuthProviderSchemaProviderType string
+
+// CustomOAuthProviderSchemaTokenEndpointAuthMethod Token endpoint client authentication method. Absent means client_secret_basic with a client_secret_post fallback.
+type CustomOAuthProviderSchemaTokenEndpointAuthMethod string
 
 // ErrorSchema defines model for ErrorSchema.
 type ErrorSchema struct {
@@ -647,8 +719,14 @@ type PostAdminCustomProvidersJSONBody struct {
 	// ClientId OAuth client ID from the provider
 	ClientId string `json:"client_id"`
 
-	// ClientSecret OAuth client secret (will be encrypted at rest)
-	ClientSecret string `json:"client_secret"`
+	// ClientSecret OAuth client secret (will be encrypted at rest). Required unless token_endpoint_auth_method is private_key_jwt.
+	ClientSecret *string `json:"client_secret,omitempty"`
+
+	// ClientSigningKey PEM-encoded private key (RSA 2048 bits or more, EC P-256/P-384/P-521, or Ed25519) used to sign client assertions. Required for, and only accepted with, token_endpoint_auth_method private_key_jwt. Encrypted at rest and never returned.
+	ClientSigningKey *string `json:"client_signing_key,omitempty"`
+
+	// ClientSigningKeyId Optional kid header for client assertions, matching the key registered with the provider.
+	ClientSigningKeyId *string `json:"client_signing_key_id,omitempty"`
 
 	// CustomClaimsAllowlist Raw IdP claim keys to copy verbatim into the user's custom_claims (e.g. groups, org_id). For OIDC providers these are read from the ID token claims (falling back to the userinfo response when no ID token is returned); for OAuth2 providers they are read from the userinfo response. Empty preserves no non-standard claims.
 	//
@@ -696,6 +774,9 @@ type PostAdminCustomProvidersJSONBody struct {
 	// SkipNonceCheck Skip nonce validation for OIDC (not recommended for production)
 	SkipNonceCheck *bool `json:"skip_nonce_check,omitempty"`
 
+	// TokenEndpointAuthMethod How the auth server authenticates at the provider's token endpoint (OIDC Core section 9). When omitted, client_secret_basic is tried first, then client_secret_post. private_key_jwt (RFC 7523) sends a client assertion signed with client_signing_key instead of a secret.
+	TokenEndpointAuthMethod *PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethod `json:"token_endpoint_auth_method,omitempty"`
+
 	// TokenUrl OAuth 2.0 token endpoint (required for provider_type: oauth2)
 	//
 	// Example: https://provider.com/oauth/token
@@ -709,6 +790,9 @@ type PostAdminCustomProvidersJSONBody struct {
 
 // PostAdminCustomProvidersJSONBodyProviderType defines parameters for PostAdminCustomProviders.
 type PostAdminCustomProvidersJSONBodyProviderType string
+
+// PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethod defines parameters for PostAdminCustomProviders.
+type PostAdminCustomProvidersJSONBodyTokenEndpointAuthMethod string
 
 // PutAdminCustomProvidersIdentifierJSONBody defines parameters for PutAdminCustomProvidersIdentifier.
 type PutAdminCustomProvidersIdentifierJSONBody struct {
@@ -729,6 +813,12 @@ type PutAdminCustomProvidersIdentifierJSONBody struct {
 
 	// ClientSecret OAuth client secret (only provide if changing, will be encrypted)
 	ClientSecret *string `json:"client_secret,omitempty"`
+
+	// ClientSigningKey PEM-encoded private key (RSA 2048 bits or more, EC P-256/P-384/P-521, or Ed25519) used to sign client assertions. Required for, and only accepted with, token_endpoint_auth_method private_key_jwt. Encrypted at rest and never returned.
+	ClientSigningKey *string `json:"client_signing_key,omitempty"`
+
+	// ClientSigningKeyId Optional kid header for client assertions, matching the key registered with the provider.
+	ClientSigningKeyId *string `json:"client_signing_key_id,omitempty"`
 
 	// CustomClaimsAllowlist Raw IdP claim keys to copy verbatim into the user's custom_claims (e.g. groups, org_id). For OIDC providers these are read from the ID token claims (falling back to the userinfo response when no ID token is returned); for OAuth2 providers they are read from the userinfo response. Empty preserves no non-standard claims.
 	CustomClaimsAllowlist *[]string `json:"custom_claims_allowlist,omitempty"`
@@ -760,12 +850,18 @@ type PutAdminCustomProvidersIdentifierJSONBody struct {
 	// SkipNonceCheck Skip nonce validation for OIDC
 	SkipNonceCheck *bool `json:"skip_nonce_check,omitempty"`
 
+	// TokenEndpointAuthMethod How the auth server authenticates at the provider's token endpoint (OIDC Core section 9). When omitted, client_secret_basic is tried first, then client_secret_post. private_key_jwt (RFC 7523) sends a client assertion signed with client_signing_key instead of a secret.
+	TokenEndpointAuthMethod *PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethod `json:"token_endpoint_auth_method,omitempty"`
+
 	// TokenUrl OAuth 2.0 token endpoint (for OAuth2 providers)
 	TokenUrl *string `json:"token_url,omitempty"`
 
 	// UserinfoUrl OAuth 2.0 userinfo endpoint (for OAuth2 providers)
 	UserinfoUrl *string `json:"userinfo_url,omitempty"`
 }
+
+// PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethod defines parameters for PutAdminCustomProvidersIdentifier.
+type PutAdminCustomProvidersIdentifierJSONBodyTokenEndpointAuthMethod string
 
 // PostAdminGenerateLinkJSONBody defines parameters for PostAdminGenerateLink.
 type PostAdminGenerateLinkJSONBody struct {
