@@ -44,6 +44,13 @@ type CustomOAuthProvider struct {
 	Enabled               bool          `db:"enabled" json:"enabled"`
 	EmailOptional         bool          `db:"email_optional" json:"email_optional"`
 
+	// Token endpoint client authentication. A nil TokenEndpointAuthMethod
+	// auto-detects between the client_secret methods. ClientSigningKey is the
+	// JWK or PEM private key used for private_key_jwt, encrypted like ClientSecret.
+	TokenEndpointAuthMethod *string `db:"token_endpoint_auth_method" json:"token_endpoint_auth_method,omitempty"`
+	ClientSigningKey        *string `db:"client_signing_key" json:"-"`
+	ClientSigningKeyID      *string `db:"client_signing_key_id" json:"client_signing_key_id,omitempty"`
+
 	// OIDC-specific fields (null for OAuth2 providers)
 	Issuer            *string        `db:"issuer" json:"issuer,omitempty"`
 	DiscoveryURL      *string        `db:"discovery_url" json:"discovery_url,omitempty"`
@@ -70,19 +77,72 @@ func (p CustomOAuthProvider) TableName() string {
 // database encryption settings. If encryption is disabled, the secret is
 // stored in plaintext (temporary fallback for now)
 func (p *CustomOAuthProvider) SetClientSecret(secret string, dbEncryption conf.DatabaseEncryptionConfiguration) error {
-	if !dbEncryption.Encrypt {
-		// Fallback: store in plaintext when encryption is not enabled.
-		p.ClientSecret = secret
-		return nil
-	}
-
-	es, err := crypto.NewEncryptedString(p.ID.String(), []byte(secret), dbEncryption.EncryptionKeyID, dbEncryption.EncryptionKey)
+	stored, err := p.encryptValue(secret, dbEncryption)
 	if err != nil {
 		return errors.Wrap(err, "error encrypting custom OAuth client secret")
 	}
-
-	p.ClientSecret = es.String()
+	p.ClientSecret = stored
 	return nil
+}
+
+// SetClientSigningKey encrypts and stores the JWK or PEM private key used for
+// private_key_jwt client authentication.
+func (p *CustomOAuthProvider) SetClientSigningKey(key string, dbEncryption conf.DatabaseEncryptionConfiguration) error {
+	stored, err := p.encryptValue(key, dbEncryption)
+	if err != nil {
+		return errors.Wrap(err, "error encrypting custom OAuth client signing key")
+	}
+	p.ClientSigningKey = &stored
+	return nil
+}
+
+// GetClientSigningKey decrypts and returns the private key, or "" if none is set.
+func (p *CustomOAuthProvider) GetClientSigningKey(dbEncryption conf.DatabaseEncryptionConfiguration) (string, error) {
+	if p.ClientSigningKey == nil {
+		return "", nil
+	}
+	value, err := p.decryptValue(*p.ClientSigningKey, dbEncryption)
+	if err != nil {
+		return "", errors.Wrap(err, "error decrypting custom OAuth client signing key")
+	}
+	return value, nil
+}
+
+// UsesPrivateKeyJWT reports whether the token endpoint expects a signed client assertion.
+func (p *CustomOAuthProvider) UsesPrivateKeyJWT() bool {
+	return p.TokenEndpointAuthMethod != nil && *p.TokenEndpointAuthMethod == TokenEndpointAuthMethodPrivateKeyJWT
+}
+
+// encryptValue encrypts a secret bound to this provider's ID. Empty values and
+// deployments without database encryption store the value as-is.
+func (p *CustomOAuthProvider) encryptValue(value string, dbEncryption conf.DatabaseEncryptionConfiguration) (string, error) {
+	if value == "" || !dbEncryption.Encrypt {
+		return value, nil
+	}
+	es, err := crypto.NewEncryptedString(p.ID.String(), []byte(value), dbEncryption.EncryptionKeyID, dbEncryption.EncryptionKey)
+	if err != nil {
+		return "", err
+	}
+	return es.String(), nil
+}
+
+// decryptValue reverses encryptValue, passing plaintext values through.
+func (p *CustomOAuthProvider) decryptValue(stored string, dbEncryption conf.DatabaseEncryptionConfiguration) (string, error) {
+	if stored == "" {
+		return "", nil
+	}
+	es := crypto.ParseEncryptedString(stored)
+	if es == nil {
+		return stored, nil
+	}
+	if dbEncryption.DecryptionKeys == nil {
+		return "", errors.New("database decryption keys not configured")
+	}
+	bytes, err := es.Decrypt(p.ID.String(), dbEncryption.DecryptionKeys)
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
 }
 
 // GetClientSecret decrypts and returns the client secret using the configured
@@ -90,26 +150,11 @@ func (p *CustomOAuthProvider) SetClientSecret(secret string, dbEncryption conf.D
 // encrypted form when encryption is enabled, but will also handle plaintext
 // secrets (for deployments where encryption is not yet configured).
 func (p *CustomOAuthProvider) GetClientSecret(dbEncryption conf.DatabaseEncryptionConfiguration) (string, error) {
-	if p.ClientSecret == "" {
-		return "", nil
-	}
-
-	es := crypto.ParseEncryptedString(p.ClientSecret)
-	if es == nil {
-		// Not an encrypted string – treat as plaintext.
-		return p.ClientSecret, nil
-	}
-
-	if dbEncryption.DecryptionKeys == nil {
-		return "", errors.New("database decryption keys not configured")
-	}
-
-	bytes, err := es.Decrypt(p.ID.String(), dbEncryption.DecryptionKeys)
+	value, err := p.decryptValue(p.ClientSecret, dbEncryption)
 	if err != nil {
 		return "", errors.Wrap(err, "error decrypting custom OAuth client secret")
 	}
-
-	return string(bytes), nil
+	return value, nil
 }
 
 // IsOIDC returns true if this is an OIDC provider

@@ -745,6 +745,11 @@ func (a *API) loadCustomProvider(ctx context.Context, db *storage.Connection, id
 		return nil, pConfig, fmt.Errorf("error decrypting client secret for provider %s: %w", identifier, err)
 	}
 
+	clientAuth, err := customProviderClientAuth(customProvider, config.Security.DBEncryption)
+	if err != nil {
+		return nil, pConfig, fmt.Errorf("error loading client authentication for provider %s: %w", identifier, err)
+	}
+
 	// Handle based on provider type
 	if customProvider.IsOAuth2() {
 		// OAuth2 provider
@@ -767,6 +772,7 @@ func (a *API) loadCustomProvider(ctx context.Context, db *storage.Connection, id
 			customProvider.AuthorizationParams,
 			customProvider.CustomClaimsAllowlist,
 		)
+		p.SetClientAuth(clientAuth)
 
 		// Build provider configuration
 		pConfig = conf.OAuthProviderConfiguration{
@@ -805,6 +811,7 @@ func (a *API) loadCustomProvider(ctx context.Context, db *storage.Connection, id
 	if err != nil {
 		return nil, pConfig, fmt.Errorf("error creating OIDC provider: %w", err)
 	}
+	p.SetClientAuth(clientAuth)
 
 	// Build provider configuration
 	pConfig = conf.OAuthProviderConfiguration{
@@ -817,6 +824,28 @@ func (a *API) loadCustomProvider(ctx context.Context, db *storage.Connection, id
 	}
 
 	return p, pConfig, nil
+}
+
+// customProviderClientAuth builds the token endpoint client authentication
+// stored for a custom provider, decrypting its signing key when needed.
+func customProviderClientAuth(customProvider *models.CustomOAuthProvider, dbEncryption conf.DatabaseEncryptionConfiguration) (provider.ClientAuth, error) {
+	if customProvider.TokenEndpointAuthMethod == nil {
+		return provider.ClientAuth{}, nil
+	}
+
+	var signingKey, keyID string
+	if customProvider.UsesPrivateKeyJWT() {
+		key, err := customProvider.GetClientSigningKey(dbEncryption)
+		if err != nil {
+			return provider.ClientAuth{}, err
+		}
+		signingKey = key
+		if customProvider.ClientSigningKeyID != nil {
+			keyID = *customProvider.ClientSigningKeyID
+		}
+	}
+
+	return provider.NewClientAuth(*customProvider.TokenEndpointAuthMethod, signingKey, keyID)
 }
 
 func redirectErrors(handler apiHandler, w http.ResponseWriter, r *http.Request, u *url.URL) {

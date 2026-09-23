@@ -213,6 +213,8 @@ func GetSigningAlg(k jwk.Key) jwt.SigningMethod {
 		return jwt.SigningMethodRS512
 	case "ES256":
 		return jwt.SigningMethodES256
+	case "ES384":
+		return jwt.SigningMethodES384
 	case "ES512":
 		return jwt.SigningMethodES512
 	case "EdDSA":

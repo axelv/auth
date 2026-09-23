@@ -25,6 +25,8 @@ const (
 	TokenEndpointAuthMethodNone              = "none"
 	TokenEndpointAuthMethodClientSecretBasic = "client_secret_basic"
 	TokenEndpointAuthMethodClientSecretPost  = "client_secret_post"
+	// Only accepted for custom providers (outbound), not by the OAuth server.
+	TokenEndpointAuthMethodPrivateKeyJWT = "private_key_jwt"
 )
 
 // OAuthServerClient represents an OAuth client application registered with this OAuth server

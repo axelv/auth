@@ -10,6 +10,8 @@ import (
 	popslices "github.com/gobuffalo/pop/v6/slices"
 	"github.com/gofrs/uuid"
 	"github.com/supabase/auth/internal/api/apierrors"
+	"github.com/supabase/auth/internal/api/provider"
+	"github.com/supabase/auth/internal/conf"
 	"github.com/supabase/auth/internal/models"
 	"github.com/supabase/auth/internal/observability"
 	"github.com/supabase/auth/internal/storage"
@@ -58,6 +60,12 @@ type AdminCustomOAuthProviderParams struct {
 	AuthorizationParams   map[string]interface{} `json:"authorization_params,omitempty"`
 	Enabled               *bool                  `json:"enabled,omitempty"`
 	EmailOptional         *bool                  `json:"email_optional,omitempty"`
+
+	// Token endpoint client authentication. client_signing_key is a JWK or PEM
+	// private key, required for (and only accepted with) private_key_jwt.
+	TokenEndpointAuthMethod *string `json:"token_endpoint_auth_method,omitempty"`
+	ClientSigningKey        string  `json:"client_signing_key,omitempty"`
+	ClientSigningKeyID      *string `json:"client_signing_key_id,omitempty"`
 
 	// OIDC-specific fields
 	Issuer         string  `json:"issuer,omitempty"`
@@ -226,6 +234,9 @@ func (a *API) adminCustomOAuthProviderCreate(w http.ResponseWriter, r *http.Requ
 	if err := provider.SetClientSecret(params.ClientSecret, config.Security.DBEncryption); err != nil {
 		return apierrors.NewInternalServerError("Error encrypting custom OAuth provider client secret").WithInternalError(err)
 	}
+	if err := setClientAuth(provider, params.ClientSigningKey, config.Security.DBEncryption); err != nil {
+		return err
+	}
 
 	// Create in database
 	err = db.Transaction(func(tx *storage.Connection) error {
@@ -330,6 +341,9 @@ func (a *API) adminCustomOAuthProviderUpdate(w http.ResponseWriter, r *http.Requ
 			return apierrors.NewInternalServerError("Error encrypting custom OAuth provider client secret").WithInternalError(err)
 		}
 	}
+	if err := setClientAuth(provider, params.ClientSigningKey, config.Security.DBEncryption); err != nil {
+		return err
+	}
 
 	err = db.Transaction(func(tx *storage.Connection) error {
 		if terr := models.UpdateCustomOAuthProvider(tx, provider); terr != nil {
@@ -431,10 +445,6 @@ func validateProviderParams(params *AdminCustomOAuthProviderParams, providerType
 	if params.ClientID == "" {
 		return apierrors.NewBadRequestError(apierrors.ErrorCodeValidationFailed, "client_id is required")
 	}
-	if params.ClientSecret == "" {
-		return apierrors.NewBadRequestError(apierrors.ErrorCodeValidationFailed, "client_secret is required")
-	}
-
 	// Type-specific validations
 	switch providerType {
 	case models.ProviderTypeOIDC:
@@ -493,19 +503,21 @@ func buildProviderFromParams(params *AdminCustomOAuthProviderParams, providerTyp
 	// Generate ID upfront so it's available for client secret encryption (used as AAD)
 	id, _ := uuid.NewV4()
 	provider := &models.CustomOAuthProvider{
-		ID:                    id,
-		ProviderType:          providerType,
-		Identifier:            params.Identifier,
-		Name:                  params.Name,
-		ClientID:              params.ClientID,
-		AcceptableClientIDs:   popslices.String(params.AcceptableClientIDs),
-		Scopes:                popslices.String(params.Scopes),
-		PKCEEnabled:           getBoolOrDefault(params.PKCEEnabled, true),
-		AttributeMapping:      popslices.Map(params.AttributeMapping),
-		CustomClaimsAllowlist: popslices.String(params.CustomClaimsAllowlist),
-		AuthorizationParams:   popslices.Map(params.AuthorizationParams),
-		Enabled:               getBoolOrDefault(params.Enabled, true),
-		EmailOptional:         getBoolOrDefault(params.EmailOptional, false),
+		ID:                      id,
+		ProviderType:            providerType,
+		Identifier:              params.Identifier,
+		Name:                    params.Name,
+		ClientID:                params.ClientID,
+		AcceptableClientIDs:     popslices.String(params.AcceptableClientIDs),
+		Scopes:                  popslices.String(params.Scopes),
+		PKCEEnabled:             getBoolOrDefault(params.PKCEEnabled, true),
+		AttributeMapping:        popslices.Map(params.AttributeMapping),
+		CustomClaimsAllowlist:   popslices.String(params.CustomClaimsAllowlist),
+		AuthorizationParams:     popslices.Map(params.AuthorizationParams),
+		Enabled:                 getBoolOrDefault(params.Enabled, true),
+		EmailOptional:           getBoolOrDefault(params.EmailOptional, false),
+		TokenEndpointAuthMethod: params.TokenEndpointAuthMethod,
+		ClientSigningKeyID:      params.ClientSigningKeyID,
 	}
 
 	// Set type-specific fields
@@ -589,6 +601,12 @@ func updateProviderFromParams(provider *models.CustomOAuthProvider, params *Admi
 	if params.EmailOptional != nil {
 		provider.EmailOptional = *params.EmailOptional
 	}
+	if params.TokenEndpointAuthMethod != nil {
+		provider.TokenEndpointAuthMethod = params.TokenEndpointAuthMethod
+	}
+	if params.ClientSigningKeyID != nil {
+		provider.ClientSigningKeyID = params.ClientSigningKeyID
+	}
 
 	// Update type-specific fields
 	if provider.IsOIDC() {
@@ -635,6 +653,49 @@ func updateProviderFromParams(provider *models.CustomOAuthProvider, params *Admi
 	}
 
 	return nil
+}
+
+// setClientAuth validates the provider's final token endpoint authentication
+// settings and stores newSigningKey, the plaintext private key from this request.
+func setClientAuth(p *models.CustomOAuthProvider, newSigningKey string, dbEncryption conf.DatabaseEncryptionConfiguration) error {
+	method := ""
+	if p.TokenEndpointAuthMethod != nil {
+		method = *p.TokenEndpointAuthMethod
+	}
+
+	switch method {
+	case "", models.TokenEndpointAuthMethodClientSecretBasic, models.TokenEndpointAuthMethodClientSecretPost:
+		if newSigningKey != "" {
+			return apierrors.NewBadRequestError(apierrors.ErrorCodeValidationFailed, "client_signing_key requires token_endpoint_auth_method 'private_key_jwt'")
+		}
+		if p.ClientSecret == "" {
+			return apierrors.NewBadRequestError(apierrors.ErrorCodeValidationFailed, "client_secret is required")
+		}
+		// A secret-based method never uses a signing key; don't keep one stored.
+		p.ClientSigningKey = nil
+		p.ClientSigningKeyID = nil
+		return nil
+	case models.TokenEndpointAuthMethodPrivateKeyJWT:
+		if newSigningKey == "" {
+			if p.ClientSigningKey == nil {
+				return apierrors.NewBadRequestError(apierrors.ErrorCodeValidationFailed, "client_signing_key is required for token_endpoint_auth_method 'private_key_jwt'")
+			}
+			return nil
+		}
+		if _, err := provider.ParseClientSigningKey(newSigningKey); err != nil {
+			return apierrors.NewBadRequestError(apierrors.ErrorCodeValidationFailed, "invalid client_signing_key: %v", err)
+		}
+		if err := p.SetClientSigningKey(newSigningKey, dbEncryption); err != nil {
+			return apierrors.NewInternalServerError("Error encrypting custom OAuth provider client signing key").WithInternalError(err)
+		}
+		return nil
+	default:
+		return apierrors.NewBadRequestError(
+			apierrors.ErrorCodeValidationFailed,
+			"token_endpoint_auth_method must be one of: %s, %s, %s",
+			models.TokenEndpointAuthMethodClientSecretBasic, models.TokenEndpointAuthMethodClientSecretPost, models.TokenEndpointAuthMethodPrivateKeyJWT,
+		)
+	}
 }
 
 // getBoolOrDefault returns the value or default if nil

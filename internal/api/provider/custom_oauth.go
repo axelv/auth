@@ -19,6 +19,7 @@ type CustomOAuthProvider struct {
 	attributeMapping      map[string]interface{}
 	authorizationParams   map[string]interface{}
 	customClaimsAllowlist []string
+	clientAuth            ClientAuth
 }
 
 // NewCustomOAuthProvider creates a new custom OAuth provider
@@ -64,9 +65,15 @@ func (p *CustomOAuthProvider) AuthCodeURL(state string, opts ...oauth2.AuthCodeO
 	return p.config.AuthCodeURL(state, opts...)
 }
 
+// SetClientAuth selects how the provider authenticates at its token endpoint.
+func (p *CustomOAuthProvider) SetClientAuth(auth ClientAuth) {
+	p.clientAuth = auth
+	auth.apply(p.config)
+}
+
 // GetOAuthToken exchanges the authorization code for an access token
 func (p *CustomOAuthProvider) GetOAuthToken(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
-	return p.config.Exchange(ctx, code, opts...)
+	return p.clientAuth.exchange(ctx, p.config, code, opts)
 }
 
 // GetUserData fetches user data from the provider's userinfo endpoint
@@ -115,6 +122,7 @@ type CustomOIDCProvider struct {
 	attributeMapping      map[string]interface{}
 	authorizationParams   map[string]interface{}
 	customClaimsAllowlist []string
+	clientAuth            ClientAuth
 }
 
 // NewCustomOIDCProvider creates a new custom OIDC provider.
@@ -186,9 +194,15 @@ func (p *CustomOIDCProvider) AuthCodeURL(state string, opts ...oauth2.AuthCodeOp
 	return p.config.AuthCodeURL(state, opts...)
 }
 
+// SetClientAuth selects how the provider authenticates at its token endpoint.
+func (p *CustomOIDCProvider) SetClientAuth(auth ClientAuth) {
+	p.clientAuth = auth
+	auth.apply(p.config)
+}
+
 // GetOAuthToken exchanges the authorization code for an access token
 func (p *CustomOIDCProvider) GetOAuthToken(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
-	return p.config.Exchange(ctx, code, opts...)
+	return p.clientAuth.exchange(ctx, p.config, code, opts)
 }
 
 // GetUserData fetches user data from the provider's userinfo endpoint or ID token
