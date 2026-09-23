@@ -3,7 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -710,6 +714,102 @@ func (ts *CustomOAuthAdminTestSuite) TestLoadCustomProviderRedirectURLUsesOverri
 	require.Equal(ts.T(), "https://custom.example.com/callback", pConfig.RedirectURI)
 }
 
+// Token endpoint client authentication (private_key_jwt)
+
+func (ts *CustomOAuthAdminTestSuite) TestPrivateKeyJWTCreateUpdateGet() {
+	payload := ts.createTestOAuth2Payload("pkjwt-provider")
+	delete(payload, "client_secret")
+	payload["token_endpoint_auth_method"] = "private_key_jwt"
+	payload["client_signing_key"] = ts.generateSigningKeyPEM()
+	payload["client_signing_key_id"] = "key-1"
+
+	w := ts.createProvider(payload, http.StatusCreated)
+	assert.NotContains(ts.T(), w.Body.String(), "PRIVATE KEY", "signing key must never be returned")
+
+	var created models.CustomOAuthProvider
+	require.NoError(ts.T(), json.NewDecoder(w.Body).Decode(&created))
+	require.NotNil(ts.T(), created.TokenEndpointAuthMethod)
+	assert.Equal(ts.T(), "private_key_jwt", *created.TokenEndpointAuthMethod)
+	require.NotNil(ts.T(), created.ClientSigningKeyID)
+	assert.Equal(ts.T(), "key-1", *created.ClientSigningKeyID)
+
+	stored, err := models.FindCustomOAuthProviderByIdentifier(ts.API.db, created.Identifier)
+	require.NoError(ts.T(), err)
+	assert.Empty(ts.T(), stored.ClientSecret)
+	require.NotNil(ts.T(), stored.ClientSigningKey)
+	assert.NotContains(ts.T(), *stored.ClientSigningKey, "PRIVATE KEY", "signing key must be encrypted at rest")
+
+	// The stored key decrypts and loads into a working provider.
+	_, _, err = ts.API.loadCustomProvider(context.Background(), ts.API.db, created.Identifier, "")
+	require.NoError(ts.T(), err)
+
+	// Updating other fields keeps the stored key.
+	w = ts.updateProvider(created.Identifier, map[string]interface{}{"name": "Renamed"}, http.StatusOK)
+	var renamed models.CustomOAuthProvider
+	require.NoError(ts.T(), json.NewDecoder(w.Body).Decode(&renamed))
+	assert.Equal(ts.T(), "private_key_jwt", *renamed.TokenEndpointAuthMethod)
+
+	// Switching to a secret method requires a secret and drops the signing key.
+	ts.updateProvider(created.Identifier, map[string]interface{}{"token_endpoint_auth_method": "client_secret_post"}, http.StatusBadRequest)
+	ts.updateProvider(created.Identifier, map[string]interface{}{
+		"token_endpoint_auth_method": "client_secret_post",
+		"client_secret":              "new-secret",
+	}, http.StatusOK)
+
+	stored, err = models.FindCustomOAuthProviderByIdentifier(ts.API.db, created.Identifier)
+	require.NoError(ts.T(), err)
+	assert.Nil(ts.T(), stored.ClientSigningKey)
+	assert.Nil(ts.T(), stored.ClientSigningKeyID)
+}
+
+func (ts *CustomOAuthAdminTestSuite) TestPrivateKeyJWTValidation() {
+	weakKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	require.NoError(ts.T(), err)
+	weakDER, err := x509.MarshalPKCS8PrivateKey(weakKey)
+	require.NoError(ts.T(), err)
+	weakPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: weakDER}))
+
+	cases := []struct {
+		name   string
+		mutate func(map[string]interface{})
+	}{
+		{"no secret and no method", func(p map[string]interface{}) {
+			delete(p, "client_secret")
+		}},
+		{"private_key_jwt without key", func(p map[string]interface{}) {
+			delete(p, "client_secret")
+			p["token_endpoint_auth_method"] = "private_key_jwt"
+		}},
+		{"signing key with a secret method", func(p map[string]interface{}) {
+			p["token_endpoint_auth_method"] = "client_secret_post"
+			p["client_signing_key"] = ts.generateSigningKeyPEM()
+		}},
+		{"malformed signing key", func(p map[string]interface{}) {
+			p["token_endpoint_auth_method"] = "private_key_jwt"
+			p["client_signing_key"] = "not a key"
+		}},
+		{"RSA key below 2048 bits", func(p map[string]interface{}) {
+			p["token_endpoint_auth_method"] = "private_key_jwt"
+			p["client_signing_key"] = weakPEM
+		}},
+		{"unknown method", func(p map[string]interface{}) {
+			p["token_endpoint_auth_method"] = "tls_client_auth"
+		}},
+	}
+
+	for i, c := range cases {
+		ts.Run(c.name, func() {
+			payload := ts.createTestOAuth2Payload(fmt.Sprintf("pkjwt-invalid-%d", i))
+			c.mutate(payload)
+			w := ts.createProvider(payload, http.StatusBadRequest)
+
+			var apiErr apierrors.HTTPError
+			require.NoError(ts.T(), json.NewDecoder(w.Body).Decode(&apiErr))
+			assert.Equal(ts.T(), apierrors.ErrorCodeValidationFailed, apiErr.ErrorCode)
+		})
+	}
+}
+
 // Helper methods
 
 func (ts *CustomOAuthAdminTestSuite) createTestOAuth2Payload(identifier string) map[string]interface{} {
@@ -770,5 +870,25 @@ func (ts *CustomOAuthAdminTestSuite) createProvider(payload map[string]interface
 
 	require.Equal(ts.T(), expectedStatus, w.Code)
 
+	return w
+}
+
+func (ts *CustomOAuthAdminTestSuite) generateSigningKeyPEM() string {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(ts.T(), err)
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(ts.T(), err)
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+}
+
+func (ts *CustomOAuthAdminTestSuite) updateProvider(identifier string, payload map[string]interface{}, expectedStatus int) *httptest.ResponseRecorder {
+	var body bytes.Buffer
+	require.NoError(ts.T(), json.NewEncoder(&body).Encode(payload))
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/admin/custom-providers/%s", identifier), &body)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", ts.token))
+	w := httptest.NewRecorder()
+	ts.API.handler.ServeHTTP(w, req)
+	require.Equal(ts.T(), expectedStatus, w.Code, w.Body.String())
 	return w
 }
